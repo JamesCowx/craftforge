@@ -1,0 +1,16 @@
+services:
+  craftforge:
+    build: .
+    container_name: craftforge
+    ports:
+      - "8080:8080"
+      - "25565:25565/tcp"
+    volumes:
+      - ./servers:/app/servers
+      - ./servers.json:/app/servers.json
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8080
+      - SERVER_DATA_DIR=/app/servers
+      - JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+    restart: unless-stopped

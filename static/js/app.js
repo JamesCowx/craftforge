@@ -1,0 +1,563 @@
+const API = {
+    async get(path) {
+        const r = await fetch(path);
+        if (!r.ok) throw new Error(await r.text());
+        return r.json();
+    },
+    async post(path, body) {
+        const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (!r.ok) throw new Error(await r.text());
+        return r.json().catch(() => ({}));
+    },
+    async put(path, body) {
+        const r = await fetch(path, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (!r.ok) throw new Error(await r.text());
+        return r.json().catch(() => ({}));
+    },
+    async del(path) {
+        const r = await fetch(path, { method: 'DELETE' });
+        if (!r.ok) throw new Error(await r.text());
+        return r.json().catch(() => ({}));
+    }
+};
+
+let state = {
+    servers: [],
+    activeServerId: null,
+    consoleWs: null,
+    installWs: null,
+    currentSettings: {},
+    uptimeInterval: null,
+    networkInterval: null,
+    systemInterval: null,
+};
+
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+
+function toast(msg, type = 'info') {
+    const c = $('#toast-container');
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    el.textContent = msg;
+    el.setAttribute('role', 'alert');
+    el.onclick = () => { el.classList.add('removing'); el.addEventListener('animationend', () => el.remove(), { once: true }); };
+    c.appendChild(el);
+    setTimeout(() => { if (el.parentNode) { el.classList.add('removing'); el.addEventListener('animationend', () => el.remove(), { once: true }); } }, 4200);
+}
+
+async function loadServers() {
+    try { state.servers = await API.get('/api/servers'); } catch (e) { console.warn('[CraftForge] loadServers failed', e); }
+    renderServerList();
+    if (state.activeServerId) {
+        const s = state.servers.find(x => x.id === state.activeServerId);
+        if (s) renderServerView(s);
+        else { state.activeServerId = null; showEmptyState(); }
+    }
+}
+
+function renderServerList() {
+    const list = $('#server-list');
+    const filter = ($('#sidebar-search')?.value || '').toLowerCase();
+    let shown = filter
+        ? state.servers.filter(s => s.name.toLowerCase().includes(filter) || s.id.toLowerCase().includes(filter) || String(s.port).includes(filter))
+        : state.servers;
+
+    if (!shown.length) {
+        list.innerHTML = `<div style="padding:28px 16px;text-align:center;color:var(--text-muted);font-size:11px;line-height:1.6;">${filter ? `No servers match "${E(filter)}"` : 'No servers yet<br><span style="font-size:10px">Press <b style="color:var(--accent)">N</b> to create one</span>'}</div>`;
+        return;
+    }
+    list.innerHTML = shown.map(s => `
+        <li class="${s.id === state.activeServerId ? 'active' : ''}" data-id="${s.id}" tabindex="0" role="button" aria-label="Select ${E(s.name)}">
+            <div class="server-list-info">
+                <div class="server-list-icon">&#9632;</div>
+                <div>
+                    <div class="server-list-name">${E(s.name)}</div>
+                    <div class="server-list-port">:${s.port} \u00B7 ${s.uptime_seconds > 0 ? fmtUptime(s.uptime_seconds) : 'offline'}</div>
+                </div>
+            </div>
+            <span class="server-list-status ${s.status}">${s.status}</span>
+        </li>
+    `).join('');
+}
+
+function selectServer(id) {
+    state.activeServerId = id;
+    const s = state.servers.find(x => x.id === id);
+    if (s) {
+        renderServerList();
+        renderServerView(s);
+        connectConsole(id);
+        checkJavaStatus();
+        startUptimeTick(s);
+    }
+}
+
+function showEmptyState() {
+    $('#empty-state').style.display = 'flex';
+    $('#server-view').style.display = 'none';
+    if (state.consoleWs) { state.consoleWs.close(); state.consoleWs = null; }
+    if (state.uptimeInterval) { clearInterval(state.uptimeInterval); state.uptimeInterval = null; }
+}
+
+function startUptimeTick(s) {
+    if (state.uptimeInterval) clearInterval(state.uptimeInterval);
+    if (s.status !== 'running') return;
+    state.uptimeInterval = setInterval(() => {
+        const sv = state.servers.find(x => x.id === state.activeServerId);
+        if (!sv || sv.status !== 'running') { clearInterval(state.uptimeInterval); return; }
+        animVal('ov-uptime', fmtUptime(sv.uptime_seconds));
+        animVal('ov-players', `${sv.player_count || 0} / ${sv.settings?.['max-players'] || 20}`);
+        if (sv.memory_mb > 0) animVal('ov-memory', sv.memory_mb.toFixed(0) + ' MB');
+        const peak = $('#ov-peak');
+        if (sv.max_players_seen > 0) { peak.textContent = `Peak: ${sv.max_players_seen}`; peak.removeAttribute('aria-hidden'); }
+        else { peak.textContent = ''; peak.setAttribute('aria-hidden', 'true'); }
+    }, 1000);
+}
+
+function animVal(id, newVal) {
+    const el = document.getElementById(id);
+    if (!el || el.textContent === newVal) return;
+    el.textContent = newVal;
+    el.style.animation = 'none';
+    el.offsetHeight;
+    el.style.animation = 'numberPop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)';
+}
+
+function fmtUptime(s) {
+    if (!s || s <= 0) return '--';
+    const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
+    if (d) return `${d}d ${h}h ${m}m`;
+    if (h) return `${h}h ${m}m ${sec}s`;
+    return m ? `${m}m ${sec}s` : `${sec}s`;
+}
+
+function renderServerView(s) {
+    $('#empty-state').style.display = 'none';
+    $('#server-view').style.display = 'flex';
+    $('#server-name').textContent = s.name;
+    $('#server-subtitle').textContent = `Port ${s.port} \u00B7 ID ${s.id}`;
+    $('#server-status').textContent = s.status;
+    $('#server-status').className = `status-badge status-${s.status}`;
+
+    $('#btn-start').disabled = s.status !== 'stopped' || !s.installed;
+    $('#btn-stop').disabled = s.status !== 'running';
+    $('#btn-restart').disabled = s.status !== 'running';
+
+    const colors = { running: 'var(--success)', stopped: 'var(--danger)', starting: 'var(--warning)', stopping: 'var(--warning)' };
+    const ovStatus = $('#ov-status');
+    ovStatus.textContent = s.status.charAt(0).toUpperCase() + s.status.slice(1);
+    ovStatus.style.color = colors[s.status] || 'var(--text-primary)';
+
+    $('#ov-uptime').textContent = s.status === 'running' ? fmtUptime(s.uptime_seconds) : '--';
+    $('#ov-players').textContent = `${s.player_count || 0} / ${s.settings?.['max-players'] || 20}`;
+    const peak = $('#ov-peak');
+    if (s.max_players_seen > 0) { peak.textContent = `Peak: ${s.max_players_seen}`; peak.removeAttribute('aria-hidden'); }
+    else { peak.textContent = ''; peak.setAttribute('aria-hidden', 'true'); }
+    const mem = s.memory_mb || 0;
+    const memEl = $('#ov-memory');
+    memEl.textContent = mem > 0 ? mem.toFixed(0) + ' MB' : '--';
+    memEl.style.color = mem > 0 ? 'var(--accent)' : 'var(--text-muted)';
+
+    $('#info-id').textContent = s.id;
+    $('#info-port').textContent = s.port;
+    $('#info-maxplayers').textContent = s.settings?.['max-players'] || 20;
+    $('#info-path').textContent = s.install_dir;
+}
+
+async function showRenameModal() {
+    const s = state.servers.find(x => x.id === state.activeServerId);
+    if (!s) return;
+    showModal('Rename Server',
+        `<div class="modal-body-field"><label for="modal-rename-input">Server Name</label><input type="text" id="modal-rename-input" value="${E(s.name)}" /></div>`,
+        async () => {
+            const name = document.getElementById('modal-rename-input').value.trim();
+            if (!name) return toast('Name cannot be empty', 'error');
+            await API.put(`/api/servers/${state.activeServerId}/rename`, { name });
+            await loadServers();
+            toast(`Renamed to "${name}"`, 'success');
+        }, 'Rename');
+}
+
+const CATS = {
+    'Server': ['motd','server-port','max-players','online-mode','enable-status','enforce-secure-profile','prevent-proxy-connections','text-filtering-config'],
+    'Gameplay': ['gamemode','difficulty','hardcore','pvp','allow-flight','spawn-protection','player-idle-timeout','max-world-size','generate-structures','allow-nether','initial-disabled-packs','initial-enabled-packs'],
+    'World': ['spawn-animals','spawn-monsters','spawn-npcs','view-distance','simulation-distance','entity-broadcast-range-percentage','max-tick-time','rate-limit','max-chained-neighbor-updates','sync-chunk-writes'],
+    'Whitelist': ['whitelist','enforce-whitelist','op-permission-level','function-permission-level'],
+    'Admin': ['enable-command-block','enable-rcon','rcon.port','rcon.password','broadcast-rcon-to-ops','broadcast-console-to-ops','enable-query','query.port','enable-jmx-monitoring'],
+    'Resources': ['resource-pack','resource-pack-sha1','require-resource-pack'],
+};
+
+function getCat(k) { for (const [c, ks] of Object.entries(CATS)) if (ks.includes(k)) return c; return 'Other'; }
+
+async function loadSettings() {
+    const pane = document.getElementById('tab-settings');
+    if (!pane?.classList.contains('active')) return;
+    const container = $('#settings-container');
+    if (container) container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted);font-size:13px;">Loading settings...</div>';
+    try {
+        state.currentSettings = await API.get(`/api/servers/${state.activeServerId}/settings`);
+        renderSettings(state.currentSettings, $('#settings-search')?.value || '');
+    } catch (e) {
+        toast('Failed to load settings', 'error');
+        if (container) container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--danger);font-size:13px;">Failed to load settings</div>';
+    }
+}
+
+let settingsSearchDebounce;
+
+function renderSettings(settings, filter = '') {
+    const container = $('#settings-container');
+    let entries = Object.entries(settings);
+    if (filter) { const q = filter.toLowerCase(); entries = entries.filter(([k]) => k.toLowerCase().includes(q)); }
+
+    const grouped = {}; entries.forEach(([k, v]) => { const c = getCat(k); (grouped[c] ??= []).push([k, v]); });
+    const order = Object.keys(CATS);
+    let html = '';
+    for (const cat of order) {
+        if (!grouped[cat]?.length) continue;
+        html += `<div class="settings-category"><div class="settings-category-title">${cat}</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px;">`;
+        grouped[cat].forEach(([k, v]) => { html += renderField(k, v); });
+        html += `</div></div>`;
+    }
+    if (grouped['Other']?.length) {
+        html += `<div class="settings-category"><div class="settings-category-title">Other</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px;">`;
+        grouped['Other'].forEach(([k, v]) => { html += renderField(k, v); });
+        html += `</div></div>`;
+    }
+    container.innerHTML = html || '<div style="text-align:center;padding:40px;color:var(--text-muted);font-size:13px;">No settings match filter</div>';
+}
+
+const DIFFICULTIES = ['peaceful', 'easy', 'normal', 'hard'];
+const GAMEMODES = ['survival', 'creative', 'adventure', 'spectator'];
+
+function renderField(key, value) {
+    const label = key.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).trim();
+
+    if (key === 'difficulty') {
+        return `<div class="setting-field"><span class="setting-field-label">${label}</span><select class="setting-field-select" data-key="${key}" data-type="select">${DIFFICULTIES.map(d => `<option value="${d}" ${value === d ? 'selected' : ''}>${d.charAt(0).toUpperCase() + d.slice(1)}</option>`).join('')}</select></div>`;
+    }
+    if (key === 'gamemode') {
+        return `<div class="setting-field"><span class="setting-field-label">${label}</span><select class="setting-field-select" data-key="${key}" data-type="select">${GAMEMODES.map(g => `<option value="${g}" ${value === g ? 'selected' : ''}>${g.charAt(0).toUpperCase() + g.slice(1)}</option>`).join('')}</select></div>`;
+    }
+
+    if (typeof value === 'boolean') {
+        return `<div class="setting-field"><span class="setting-field-label">${label}</span><label class="toggle-switch"><input type="checkbox" data-key="${key}" data-type="bool" ${value ? 'checked' : ''} /><span class="toggle-slider"></span></label></div>`;
+    } else if (typeof value === 'number') {
+        const step = Number.isInteger(value) ? '1' : 'any';
+        return `<div class="setting-field"><span class="setting-field-label">${label}</span><input type="number" class="setting-field-input" data-key="${key}" data-type="number" value="${value}" step="${step}" /></div>`;
+    } else {
+        return `<div class="setting-field"><span class="setting-field-label">${label}</span><input type="text" class="setting-field-input" data-key="${key}" data-type="string" value="${E(String(value || ''))}" /></div>`;
+    }
+}
+
+async function saveSettings() {
+    const fields = $$('[data-key]');
+    const settings = {};
+    fields.forEach(f => {
+        const key = f.dataset.key;
+        let val;
+        if (f.dataset.type === 'bool') val = f.checked;
+        else if (f.dataset.type === 'select') val = f.value;
+        else if (f.dataset.type === 'number') val = f.value === '' ? 0 : parseFloat(f.value);
+        else val = f.value;
+        settings[key] = val;
+    });
+    if (!Object.keys(settings).length) return;
+    const btn = $('#btn-save-settings');
+    btn.disabled = true; btn.textContent = 'Saving...';
+    try { await API.put(`/api/servers/${state.activeServerId}/settings`, { settings }); await loadServers(); toast('Settings saved', 'success'); }
+    catch (e) { toast('Failed to save', 'error'); }
+    btn.disabled = false; btn.textContent = 'Save Changes';
+}
+
+async function resetSettings() {
+    try {
+        const def = await API.get('/api/servers/defaults/settings');
+        state.currentSettings = def;
+        renderSettings(def, $('#settings-search')?.value || '');
+        toast('Reset to defaults (unsaved)', 'info');
+    } catch (e) {
+        toast('Failed to reset settings', 'error');
+    }
+}
+
+async function applyPreset(id) {
+    if (!id) return;
+    try {
+        const presets = await API.get('/api/servers/defaults/presets');
+        const p = presets[id]; if (!p) return;
+        const def = await API.get('/api/servers/defaults/settings');
+        state.currentSettings = { ...def, ...p.settings };
+        renderSettings(state.currentSettings, $('#settings-search')?.value || '');
+        toast(`Applied "${p.label}" preset (unsaved)`, 'info');
+    } catch (e) {
+        toast('Failed to apply preset', 'error');
+    }
+    $('#settings-preset').value = '';
+}
+
+function connectConsole(serverId, retries = 5) {
+    if (state.consoleWs) { state.consoleWs.close(); state.consoleWs = null; }
+    const output = $('#console-output');
+    if (!output) return;
+    output.innerHTML = '';
+
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${proto}//${location.host}/ws/console/${serverId}`);
+    state.consoleWs = ws;
+    ws.onmessage = e => { if (e.data !== '__PING__') appendLog(e.data); };
+    ws.onclose = () => {
+        state.consoleWs = null;
+        if (retries > 0) setTimeout(() => connectConsole(serverId, retries - 1), 2000);
+    };
+    ws.onerror = () => { state.consoleWs = null; };
+}
+
+function appendLog(text) {
+    const output = $('#console-output');
+    const span = document.createElement('span');
+    span.className = 'log-line';
+    const lo = text.toLowerCase();
+    if (/error|fail|fatal|critical|exception|traceback/.test(lo)) span.classList.add('log-error');
+    else if (/warn|warning/.test(lo)) span.classList.add('log-warn');
+    else if (/success|complete|loaded|started|connected|ready|done/.test(lo)) span.classList.add('log-success');
+    else if (/debug|trace|verbose/.test(lo)) span.classList.add('log-debug');
+    else if (/minecraft|server|world|chunk|block|player|entity|tick/.test(lo)) span.classList.add('log-mc');
+    else if (/^\[.*\]\s*$/.test(text) || text.length < 3) span.classList.add('log-dim');
+    span.textContent = text;
+    output.appendChild(span);
+    output.appendChild(document.createTextNode('\n'));
+    while (output.children.length > 1200) { output.removeChild(output.firstChild); }
+    if ($('#console-autoscroll')?.checked) output.scrollTop = output.scrollHeight;
+}
+
+async function sendCommand() {
+    const input = $('#console-input');
+    const cmd = input.value.trim();
+    if (!cmd) return;
+    appendLog(`> ${cmd}`);
+    try { await API.post(`/api/servers/${state.activeServerId}/command`, { command: cmd }); }
+    catch (e) { toast('Failed to send command', 'error'); }
+    input.value = ''; input.focus();
+}
+
+async function checkJavaStatus() {
+    try {
+        const r = await API.get('/api/install/java/status');
+        const el = $('#java-status-text'), dot = $('#java-dot');
+        if (el) { el.textContent = r.installed ? 'Java Installed & Ready' : 'Java Not Found'; el.style.color = r.installed ? 'var(--success)' : 'var(--danger)'; }
+        if (dot) dot.className = 'install-dot ' + (r.installed ? 'ok' : 'bad');
+    } catch (e) { console.warn('[CraftForge] checkJavaStatus failed', e); }
+}
+
+async function installServer() {
+    const output = $('#install-output');
+    output.style.display = 'block';
+    output.textContent = 'Connecting...\n';
+    if (state.installWs) state.installWs.close();
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${proto}//${location.host}/ws/install/${state.activeServerId}`);
+    state.installWs = ws;
+    ws.onmessage = e => {
+        output.textContent += e.data + '\n';
+        output.scrollTop = output.scrollHeight;
+        if (e.data.startsWith('__COMPLETE__')) { ws.close(); toast('Server installed', 'success'); loadServers().then(() => { const sv = state.servers.find(x => x.id === state.activeServerId); if (sv) renderServerView(sv); }); }
+    };
+    ws.onclose = () => {
+        state.installWs = null;
+        const btn = $('#btn-install-server');
+        btn.disabled = false; btn.textContent = 'Install / Update Minecraft Server';
+    };
+    ws.onerror = () => {
+        state.installWs = null;
+        const btn = $('#btn-install-server');
+        btn.disabled = false; btn.textContent = 'Install / Update Minecraft Server';
+    };
+    $('#btn-install-server').disabled = true; $('#btn-install-server').textContent = 'Installing...';
+}
+
+async function updateSystemInfo() {
+    try {
+        const i = await API.get('/api/system');
+        $('#sys-cpu').textContent = `CPU ${i.cpu_percent || 0}%`;
+        $('#sys-ram').textContent = `RAM ${i.memory_percent || 0}%`;
+    } catch (e) { console.warn('[CraftForge] updateSystemInfo failed', e); }
+}
+
+async function updateConnectionInfo() {
+    if (!state.activeServerId) return;
+    try {
+        const net = await API.get('/api/system/network');
+        const port = state.servers.find(x => x.id === state.activeServerId)?.port || 25565;
+        const lanEl = document.getElementById('conn-lan');
+        const wanEl = document.getElementById('conn-wan');
+        const portEl = document.getElementById('conn-port');
+        if (lanEl) lanEl.textContent = `${net.local_ip}:${port}`;
+        if (wanEl) wanEl.textContent = `${net.public_ip}:${port}`;
+        if (portEl) portEl.textContent = port;
+    } catch (e) { console.warn('[CraftForge] updateConnectionInfo failed', e); }
+}
+
+function showModal(title, bodyHtml, onConfirm, confirmText = 'Confirm', confirmClass = 'btn-primary') {
+    const overlay = $('#modal-overlay');
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-labelledby', 'modal-title');
+    $('#modal-title').textContent = title;
+    $('#modal-body').innerHTML = bodyHtml;
+    overlay.style.display = 'flex';
+    $('#modal-confirm').className = `btn ${confirmClass}`;
+    $('#modal-confirm').textContent = confirmText;
+    $('#modal-confirm').onclick = async () => {
+        $('#modal-confirm').disabled = true;
+        try { await onConfirm(); } catch (e) { console.warn('[CraftForge] modal action failed', e); }
+        $('#modal-confirm').disabled = false;
+        overlay.style.display = 'none';
+    };
+    $('#modal-cancel').onclick = () => { overlay.style.display = 'none'; };
+    overlay.onclick = e => { if (e.target === overlay) overlay.style.display = 'none'; };
+    document.addEventListener('keydown', function escHandler(e) { if (e.key === 'Escape') { overlay.style.display = 'none'; document.removeEventListener('keydown', escHandler); } });
+    setTimeout(() => { const inp = document.querySelector('#modal-name, #modal-rename-input'); if (inp) inp.focus(); }, 120);
+}
+
+async function showNewServerModal() {
+    showModal('Create New Server',
+        `<div class="modal-body-field"><label for="modal-name">Server Name</label><input type="text" id="modal-name" placeholder="My Minecraft Server" /></div>
+         <div class="modal-body-field"><label for="modal-port">Port</label><input type="number" id="modal-port" value="25565" min="1024" max="65535" /></div>
+         <div class="modal-body-field"><label for="modal-players">Max Players</label><input type="number" id="modal-players" value="20" min="1" max="100" /></div>`,
+        async () => {
+            const name = document.getElementById('modal-name').value.trim() || 'Unnamed Server';
+            const port = parseInt(document.getElementById('modal-port').value, 10);
+            const players = parseInt(document.getElementById('modal-players').value, 10);
+            if (isNaN(port) || port < 1024 || port > 65535) { toast('Port must be 1024-65535', 'error'); return; }
+            if (isNaN(players) || players < 1) { toast('Max players must be at least 1', 'error'); return; }
+            const s = await API.post('/api/servers', { name, port });
+            if (!s || !s.id) { toast('Server creation failed', 'error'); return; }
+            await API.put(`/api/servers/${s.id}/settings`, { settings: { 'max-players': players, motd: name, 'server-port': port } });
+            await loadServers();
+            selectServer(s.id);
+            toast(`"${name}" created`, 'success');
+        }, 'Create Server');
+}
+
+async function deleteServer() {
+    const s = state.servers.find(x => x.id === state.activeServerId);
+    if (!s) return;
+    showModal('Delete Server',
+        `<p>Permanently delete <strong style="color:var(--text-primary)">${E(s.name)}</strong>?</p><p style="margin-top:8px;color:var(--danger);font-size:11px;">This cannot be undone. Server files remain on disk.</p>`,
+        async () => { await API.del(`/api/servers/${state.activeServerId}`); state.activeServerId = null; await loadServers(); showEmptyState(); toast('Server deleted', 'info'); },
+        'Delete', 'btn-danger');
+}
+
+function E(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+document.addEventListener('input', e => {
+    if (e.target.id === 'sidebar-search') renderServerList();
+    if (e.target.id === 'settings-search') {
+        clearTimeout(settingsSearchDebounce);
+        settingsSearchDebounce = setTimeout(() => renderSettings(state.currentSettings, e.target.value), 150);
+    }
+});
+
+document.addEventListener('change', e => {
+    if (e.target.id === 'settings-preset') applyPreset(e.target.value);
+});
+
+document.addEventListener('click', e => {
+    if (e.target.classList.contains('tab')) {
+        const name = e.target.dataset.tab;
+        if (e.target.classList.contains('active')) return;
+        $$('.tab').forEach(t => t.classList.remove('active'));
+        e.target.classList.add('active');
+        $$('.tab-pane').forEach(p => p.classList.remove('active'));
+        const pane = document.getElementById(`tab-${name}`);
+        if (pane) pane.classList.add('active');
+        if (name === 'settings') loadSettings();
+        if (name === 'console') connectConsole(state.activeServerId);
+        if (name === 'install') checkJavaStatus();
+    }
+});
+
+$('#server-list').addEventListener('click', e => {
+    const li = e.target.closest('li[data-id]');
+    if (li) selectServer(li.dataset.id);
+});
+
+$('#server-list').addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        const li = e.target.closest('li[data-id]');
+        if (li) selectServer(li.dataset.id);
+    }
+});
+
+$('#btn-new-server').addEventListener('click', showNewServerModal);
+$('#btn-empty-create').addEventListener('click', showNewServerModal);
+$('#btn-rename').addEventListener('click', showRenameModal);
+
+document.addEventListener('click', e => {
+    if (e.target.classList.contains('conn-copy')) {
+        const key = e.target.dataset.target;
+        const el = document.getElementById(key);
+        if (!el) return;
+        navigator.clipboard.writeText(el.textContent).then(() => toast('Copied to clipboard', 'success'));
+    }
+});
+
+const withLoading = (btnId, action, label, okMsg, errMsg) => {
+    const btn = $(btnId);
+    btn.addEventListener('click', async () => {
+        btn.disabled = true; const orig = btn.textContent;
+        btn.innerHTML = '<span class="btn-working">\u25CF</span> Working...';
+        try { await action(); toast(okMsg, 'success'); } catch (e) { toast(errMsg, 'error'); }
+        await loadServers();
+        if (state.activeServerId) {
+            const s = state.servers.find(x => x.id === state.activeServerId);
+            if (s) { renderServerView(s); if (s.status === 'running') { startUptimeTick(s); connectConsole(state.activeServerId); } }
+        }
+        btn.disabled = false; btn.textContent = label;
+    });
+};
+
+withLoading('#btn-start', () => API.post(`/api/servers/${state.activeServerId}/start`), 'Start', 'Server starting...', 'Failed to start');
+withLoading('#btn-stop', () => API.post(`/api/servers/${state.activeServerId}/stop`), 'Stop', 'Server stopped', 'Failed to stop');
+withLoading('#btn-restart', () => API.post(`/api/servers/${state.activeServerId}/restart`), 'Restart', 'Server restarting...', 'Failed to restart');
+
+$('#btn-delete').addEventListener('click', deleteServer);
+$('#btn-save-settings').addEventListener('click', saveSettings);
+$('#btn-reset-settings').addEventListener('click', resetSettings);
+$('#btn-send-command').addEventListener('click', sendCommand);
+$('#btn-clear-console').addEventListener('click', () => { $('#console-output').innerHTML = ''; });
+$('#btn-install-server').addEventListener('click', installServer);
+
+$('#console-input').addEventListener('keydown', e => { if (e.key === 'Enter') sendCommand(); });
+
+document.addEventListener('keydown', e => {
+    if (e.ctrlKey || e.metaKey || ['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
+    if (e.key === 'n' || e.key === 'N') { e.preventDefault(); showNewServerModal(); }
+    if (e.key === 'F2' && state.activeServerId) { e.preventDefault(); showRenameModal(); }
+    if (e.key === 'Escape') {
+        const overlay = $('#modal-overlay');
+        if (overlay.style.display !== 'none') overlay.style.display = 'none';
+    }
+});
+
+setInterval(loadServers, 6000);
+state.systemInterval = setInterval(() => { updateSystemInfo(); updateConnectionInfo(); }, 10000);
+
+Promise.all([loadServers(), updateSystemInfo(), updateConnectionInfo()]).then(() => {
+    if (state.servers.length > 0 && !state.activeServerId) {
+        const first = state.servers.find(s => s.installed) || state.servers[0];
+        selectServer(first.id);
+    }
+});
+
+setInterval(() => {
+    if (state.activeServerId) {
+        const s = state.servers.find(x => x.id === state.activeServerId);
+        if (s) {
+            if (s.status === 'stopped') { $('#btn-stop').disabled = true; $('#btn-restart').disabled = true; }
+        }
+    }
+}, 3000);
