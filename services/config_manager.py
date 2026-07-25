@@ -48,6 +48,7 @@ DEFAULT_MINECRAFT_SETTINGS = {
     "prevent-proxy-connections": False,
     "initial-disabled-packs": "",
     "initial-enabled-packs": "vanilla",
+    "max-memory-gb": 2,
 }
 
 SETTINGS_PRESETS = {

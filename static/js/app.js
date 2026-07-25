@@ -180,7 +180,7 @@ async function showRenameModal() {
 }
 
 const CATS = {
-    'Server': ['motd','server-port','max-players','online-mode','enable-status','enforce-secure-profile','prevent-proxy-connections','text-filtering-config'],
+    'Server': ['motd','server-port','max-players','online-mode','enable-status','enforce-secure-profile','prevent-proxy-connections','text-filtering-config','max-memory-gb'],
     'Gameplay': ['gamemode','difficulty','hardcore','pvp','allow-flight','spawn-protection','player-idle-timeout','max-world-size','generate-structures','allow-nether','initial-disabled-packs','initial-enabled-packs'],
     'World': ['spawn-animals','spawn-monsters','spawn-npcs','view-distance','simulation-distance','entity-broadcast-range-percentage','max-tick-time','rate-limit','max-chained-neighbor-updates','sync-chunk-writes'],
     'Whitelist': ['whitelist','enforce-whitelist','op-permission-level','function-permission-level'],

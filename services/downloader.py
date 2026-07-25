@@ -3,6 +3,7 @@ import json
 import os
 import platform
 import urllib.request
+from functools import partial
 
 VERSION_MANIFEST_URL = "https://launchermeta.mojang.com/mc/game/version_manifest.json"
 MINECRAFT_APP_ID = "minecraft"  # used as identifier, not steam
@@ -25,6 +26,8 @@ async def is_java_installed() -> bool:
         _, stderr = await process.communicate()
         return process.returncode == 0 and "version" in stderr.decode(errors="replace").lower()
     except (FileNotFoundError, OSError):
+        return False
+    except Exception:
         return False
 
 
@@ -67,34 +70,30 @@ async def download_minecraft_server(install_dir: str, on_progress=None) -> bool:
 
     if on_progress:
         await on_progress(f"Downloading Minecraft server v{version_id}...")
-        await on_progress(f"URL: {url}")
 
-    req = urllib.request.Request(url, headers={"User-Agent": "CraftForge/1.0"})
-    try:
-        with urllib.request.urlopen(req) as resp:
-            total = int(resp.headers.get("Content-Length", 0))
-            downloaded = 0
-            chunk_size = 8192
-            with open(jar_path, "wb") as f:
-                while True:
-                    chunk = resp.read(chunk_size)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if total and on_progress:
-                        pct = int(downloaded * 100 / total)
-                        mb_dl = downloaded / (1024 * 1024)
-                        mb_total = total / (1024 * 1024)
-                        await on_progress(f"Downloaded {mb_dl:.1f}/{mb_total:.1f} MB ({pct}%)")
-    except Exception as e:
-        if on_progress:
-            await on_progress(f"ERROR: Download failed - {e}")
-        return False
+    loop = asyncio.get_event_loop()
 
-    if not os.path.exists(jar_path) or os.path.getsize(jar_path) == 0:
+    def _download() -> bool:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "CraftForge/1.0"})
+            with urllib.request.urlopen(req) as resp:
+                total = int(resp.headers.get("Content-Length", 0))
+                chunk_size = 8192
+                with open(jar_path, "wb") as f:
+                    while True:
+                        chunk = resp.read(chunk_size)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+            return True
+        except Exception:
+            return False
+
+    ok = await loop.run_in_executor(None, _download)
+
+    if not ok or not os.path.exists(jar_path) or os.path.getsize(jar_path) == 0:
         if on_progress:
-            await on_progress("ERROR: Downloaded file is empty or missing")
+            await on_progress("ERROR: Download failed - file is empty or missing")
         return False
 
     if on_progress:

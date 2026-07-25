@@ -3,7 +3,6 @@ from fastapi import APIRouter, HTTPException
 from services.downloader import (
     download_minecraft_server,
     is_java_installed,
-    is_server_installed,
 )
 from services.server_manager import server_manager
 
