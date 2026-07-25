@@ -104,8 +104,8 @@ Open **http://localhost:8080** in your browser.
 
 <table>
 <tr>
-<td width="50%"><img src="preview_overview.png" alt="CraftForge Overview" width="100%" /></td>
-<td width="50%"><img src="preview_settings.png" alt="CraftForge Settings" width="100%" /></td>
+<td width="50%"><img src="static/preview_overview.svg" alt="CraftForge Overview" width="100%" /></td>
+<td width="50%"><img src="static/preview_settings.svg" alt="CraftForge Settings" width="100%" /></td>
 </tr>
 <tr>
 <td align="center"><strong>Server Overview</strong> — stats, details, and connection info</td>
