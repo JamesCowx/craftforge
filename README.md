@@ -79,6 +79,8 @@ A web-based GUI for creating, configuring, and hosting Minecraft dedicated serve
 
 ## Quick Start
 
+### Option 1: Run with Python (Recommended)
+
 ```bash
 # Clone the repo
 git clone https://github.com/JamesCowx/craftforge.git
@@ -93,9 +95,40 @@ python main.py
 
 Open **http://localhost:8080** in your browser.
 
+### Option 2: Run with Launcher Script (No Manual Setup)
+
+**Windows** — double-click `craftforge.bat`:
+- Automatically checks for Python and installs dependencies
+- Falls back to a standalone `.exe` if one exists in the folder
+- No command line needed
+
+**Linux/macOS** — run `craftforge.sh`:
+```bash
+chmod +x craftforge.sh
+./craftforge.sh
+```
+
+### Option 3: Standalone Executable (No Python Required)
+
+Build a portable `.exe` / binary that bundles Python + all dependencies:
+
+```bash
+pip install pyinstaller
+python build_exe.py
+```
+
+The executable is written to `dist/craftforge.exe` (Windows) or `dist/craftforge` (Linux/macOS). Just copy it anywhere and run:
+
+```bash
+./craftforge.exe        # Windows
+./craftforge            # Linux/macOS
+```
+
+No Python installation required. Java is still needed for running Minecraft servers.
+
 ### Prerequisites
 
-- **Python 3.11+** — for the web server
+- **Python 3.11+** — needed for Options 1 and 2; not required for the standalone executable
 - **Java 17+** — for running Minecraft servers (checked automatically during install)
 
 ---
@@ -368,6 +401,8 @@ docker compose stop       # Stop containers
 docker compose up -d      # Start again
 ```
 
+> **Prefer a native app?** See **Option 3** in Quick Start above — you can build a standalone executable with `python build_exe.py` that doesn't require Docker, Python, or any runtime (except Java for Minecraft).
+
 ---
 
 ## Docker
@@ -453,6 +488,9 @@ craftforge/
 ├── .env.example             # Environment variable template
 ├── Dockerfile               # Python + Java 17 image
 ├── docker-compose.yml       # Docker Compose config
+├── build_exe.py             # Build standalone executable (PyInstaller)
+├── craftforge.bat           # Windows launcher (double-click to run)
+├── craftforge.sh            # Linux/macOS launcher
 ├── api/
 │   ├── servers.py           # Server CRUD + lifecycle endpoints
 │   ├── install.py           # Java check + REST install
