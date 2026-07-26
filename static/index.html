@@ -36,7 +36,7 @@
             <span class="sys-sep">&middot;</span>
             <span id="sys-ram">RAM --%</span>
         </div>
-        <div class="sidebar-footer-text">Minecraft Server Manager</div>
+        <div class="sidebar-footer-text" id="sidebar-footer-text">Minecraft Server Manager</div>
     </div>
 </aside>
 
@@ -172,7 +172,11 @@
                 <div class="card console-card">
                     <div class="card-header" style="margin-bottom:0;">
                         <h3>Live Console</h3>
-                        <div style="display:flex;gap:10px;">
+                        <div style="display:flex;gap:10px;align-items:center;">
+                            <div class="console-filter-wrap" style="position:relative">
+                                <input type="text" id="console-filter" class="console-filter" placeholder="Filter output..." />
+                                <span id="console-filter-hint" class="console-filter-hint"></span>
+                            </div>
                             <label class="toggle-label">
                                 <input type="checkbox" id="console-autoscroll" checked />
                                 Auto-scroll
@@ -183,7 +187,7 @@
                     <pre id="console-output"></pre>
                     <div class="console-toolbar">
                         <span class="console-prompt">&gt;</span>
-                        <input type="text" id="console-input" placeholder="Enter command (/help, /list, /say, /gamemode, /tp)" />
+                        <input type="text" id="console-input" placeholder="Enter command (/help, /list, /say, /gamemode, /tp)" autocomplete="off" spellcheck="false" />
                         <button id="btn-send-command" class="btn btn-primary btn-sm">Send</button>
                     </div>
                 </div>

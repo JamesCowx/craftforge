@@ -16,26 +16,46 @@ async def console_websocket(websocket: WebSocket, server_id: str):
 
     await websocket.accept()
 
-    for line in server.log_lines[-200:]:
-        await websocket.send_text(line)
+    try:
+        for line in server.log_lines[-200:]:
+            await websocket.send_text(line)
+    except Exception:
+        await websocket.close()
+        return
 
-    queue = asyncio.Queue()
+    queue = asyncio.Queue(maxsize=500)
 
     async def log_handler(sid: str, line: str):
         if sid == server_id:
-            await queue.put(line)
+            try:
+                queue.put_nowait(line)
+            except asyncio.QueueFull:
+                pass
+
+    def safe_send(queue, ws):
+        async def _run():
+            while True:
+                try:
+                    line = await asyncio.wait_for(queue.get(), timeout=30)
+                    try:
+                        await ws.send_text(line)
+                    except Exception:
+                        return
+                except asyncio.TimeoutError:
+                    try:
+                        await ws.send_text("__PING__")
+                    except Exception:
+                        return
+        return _run
 
     server.log_callback = log_handler
+    sender = asyncio.create_task(safe_send(queue, websocket)())
 
     try:
-        while True:
-            try:
-                line = await asyncio.wait_for(queue.get(), timeout=30)
-                await websocket.send_text(line)
-            except asyncio.TimeoutError:
-                await websocket.send_text("__PING__")
+        await sender
     except WebSocketDisconnect:
-        pass
+        sender.cancel()
     finally:
+        sender.cancel()
         if server.log_callback == log_handler:
             server.log_callback = None

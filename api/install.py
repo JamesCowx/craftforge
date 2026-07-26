@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
 from services.downloader import (
+    accept_eula,
     download_minecraft_server,
     is_java_installed,
 )
@@ -26,7 +27,6 @@ async def install_server(server_id: str):
 
     ok = await download_minecraft_server(server.install_dir)
     if ok:
-        from services.downloader import accept_eula
         await accept_eula(server.install_dir)
-        server_manager.mark_installed(server_id)
+        await server_manager.mark_installed(server_id)
     return {"ok": ok}

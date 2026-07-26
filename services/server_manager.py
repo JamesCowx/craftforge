@@ -306,7 +306,7 @@ class ServerManager:
             server.status = "stopped"
             server.process = None
             server.uptime_start = None
-            self._save()
+            await self._save()
 
     def get_logs(self, server_id: str) -> List[str]:
         server = self._servers.get(server_id)
@@ -314,12 +314,12 @@ class ServerManager:
             return []
         return list(server.log_lines)
 
-    def mark_installed(self, server_id: str, version: str = "latest") -> None:
+    async def mark_installed(self, server_id: str, version: str = "latest") -> None:
         server = self._servers.get(server_id)
         if server:
             server.installed = True
             server.version = version
-            self._save()
+            await self._save()
 
 
 server_manager = ServerManager()
