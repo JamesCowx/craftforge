@@ -115,44 +115,257 @@ Open **http://localhost:8080** in your browser.
 
 ---
 
-## Usage
+## Tutorial: From Zero to a Running Minecraft Server
 
-### Creating a Server
+This tutorial walks you through the entire process — from installing CraftForge to having your friends connect to your Minecraft server.
 
-1. Click **+ New Server** in the sidebar (or press `N`)
-2. Enter a name, port (default `25565`), and max players
-3. The server appears in the sidebar — select it to manage
+---
 
-### Installing Minecraft
+### Step 0: Prerequisites
 
-1. Select a server, go to **Install & Updates**
-2. Ensure Java is detected (green dot)
+Before you begin, make sure you have these installed:
+
+| Requirement | How to Check | Where to Get It |
+|-------------|-------------|-----------------|
+| **Python 3.11+** | `python --version` | [python.org](https://python.org) |
+| **Java 17+** | `java -version` | [adoptium.net](https://adoptium.net) (recommended) or `sudo apt install openjdk-17-jre` (Linux) |
+| **Git** | `git --version` | [git-scm.com](https://git-scm.com) |
+
+> **Windows users**: Add Python and Java to your system PATH during installation. CraftForge will detect Java via the `JAVA_HOME` environment variable or by searching your PATH.
+
+---
+
+### Step 1: Install CraftForge
+
+Open a terminal and run:
+
+```bash
+# Clone the repository
+git clone https://github.com/JamesCowx/craftforge.git
+cd craftforge
+
+# Install Python dependencies
+pip install -r requirements.txt
+```
+
+---
+
+### Step 2: Start the Web UI
+
+```bash
+python main.py
+```
+
+You'll see output like:
+```
+INFO:     Uvicorn running on http://0.0.0.0:8080
+INFO:     (Press CTRL+C to quit)
+```
+
+Open **http://localhost:8080** in your browser. You should see the CraftForge dashboard with an empty sidebar and a "No Server Selected" screen.
+
+> **Tip**: For production, use `python run.py` instead — it runs with optimized settings and proxy headers.
+
+---
+
+### Step 3: Create a Server Instance
+
+1. Click **+ New Server** in the sidebar (or press the `N` key)
+2. Fill in the modal:
+   - **Server Name**: `Survival World` (or whatever you like)
+   - **Port**: `25565` (the default Minecraft port)
+   - **Max Players**: `20`
+3. Click **Create Server**
+
+Your new server appears in the sidebar and is automatically selected. The main view shows the **Overview** tab with placeholder stats.
+
+![Create Server Modal](static/preview_overview.svg)
+
+---
+
+### Step 4: Install Minecraft Server Files
+
+Before you can start the server, you need to download the Minecraft server JAR.
+
+1. Click the **Install & Updates** tab
+2. Check the **Java Runtime** status:
+   - **Green dot "Java Installed & Ready"** — you're good to proceed
+   - **Red dot "Java Not Found"** — install Java 17+ and restart CraftForge
 3. Click **Install / Update Minecraft Server**
-4. The JAR downloads from Mojang's servers; the EULA is auto-accepted
 
-### Starting & Stopping
+   The installer:
+   - Fetches the latest version manifest from Mojang
+   - Downloads the server JAR (~50 MB)
+   - Saves it in the server's install directory
+   - Auto-accepts the Minecraft EULA
+   - Marks the server as installed
 
-Use **Start**, **Stop**, **Restart** in the header. The server runs as a subprocess; output streams to the web console in real time.
+4. Wait for the `__COMPLETE__` message in the output panel
 
-### Editing Settings
+After installation, the **Start** button becomes active.
 
-The **Settings** tab exposes every `server.properties` option:
+---
 
-- **Categories**: Server, Gameplay, World, Whitelist, Admin, Resources
-- **Filter**: Search bar to quickly find any setting
-- **Presets**: Dropdown to apply Survival/Creative/Hardcore/Peaceful
-- **Controls**: Toggles for booleans, number inputs, dropdowns for gamemode/difficulty
-- **Save**: Click **Save Changes** to persist to `server.properties`
+### Step 5: Configure Server Settings (Optional)
 
-### Console
+Click the **Settings** tab to customize your server before starting it:
 
-The **Console** tab provides a live terminal. Type any Minecraft server command:
+#### Using a Preset
+1. Open the **Apply Preset** dropdown
+2. Choose a preset:
+   - **Survival** — classic survival mode (easy difficulty)
+   - **Creative** — flight enabled, peaceful, no PvP
+   - **Hardcore** — hard difficulty, permadeath enabled
+   - **Peaceful** — no monsters, relaxed building
+
+   The preset is applied immediately (but not saved to disk yet).
+
+#### Editing Individual Settings
+Settings are organized into categories:
+
+| Category | Includes |
+|----------|----------|
+| **Server** | MOTD, port, max players, online mode, memory allocation |
+| **Gameplay** | Gamemode, difficulty, PvP, hardcore, flight, world size |
+| **World** | View distance, simulation distance, spawn rates, tick time |
+| **Whitelist** | Whitelist toggle, OP permission level |
+| **Admin** | Command blocks, RCON, query, JMX monitoring |
+| **Resources** | Resource pack URL and SHA1 |
+
+To edit a setting:
+- **Toggle** — click the switch for boolean values (e.g., `pvp`, `enable-command-block`)
+- **Number** — type a value or use the arrows (e.g., `max-players`, `view-distance`)
+- **Dropdown** — select from predefined options (e.g., `difficulty`: Peaceful/Easy/Normal/Hard)
+- **Text** — type a string (e.g., `motd` message of the day)
+
+#### Save Your Changes
+Click **Save Changes** to write the settings to `server.properties`. Your changes persist across restarts.
+
+![Settings Tab](static/preview_settings.svg)
+
+---
+
+### Step 6: Start the Server
+
+1. Go back to the **Overview** tab
+2. Click the green **Start** button
+
+   CraftForge will:
+   - Write the current settings to `server.properties`
+   - Allocate memory (default: 2 GB; configurable via `max-memory-gb` in Settings)
+   - Launch the JAR with `--nogui` and your configured port
+   - Stream all output to the Console tab in real time
+
+3. The status badge changes to **Running** (green) and the stats come to life:
+   - **Status**: Running
+   - **Uptime**: starts counting
+   - **Memory**: shows live RAM usage
+   - **Players**: updates as people join
+
+> **First start note**: The first launch generates the world and may take 30–60 seconds. Watch the Console tab for progress.
+
+---
+
+### Step 7: Connect to Your Server
+
+#### On the Same Computer
+Open Minecraft Java Edition → **Multiplayer** → **Add Server** → enter:
+```
+localhost:25565
+```
+
+#### On the Same Local Network
+Check the **Connection Info** card on the Overview tab. It shows:
+- **Local Network**: `192.168.x.x:25565`
+- Share this address with players on your Wi-Fi
+
+#### Over the Internet
+1. Check the **Internet** address in Connection Info (your public IP)
+2. **Port forward** port `25565` TCP on your router to the computer running CraftForge
+3. Share `your-public-ip:25565` with friends
+
+> **Need help with port forwarding?** Search "port forwarding [your router model]" or check [portforward.com](https://portforward.com).
+
+---
+
+### Step 8: Manage the Server
+
+#### Live Console
+Click the **Console** tab to see the live server output and type commands:
 
 ```
-/help        — List commands
-/list        — Show online players
-/say hello   — Broadcast a message
-/gamemode creative @a  — Switch everyone to creative
+/help                  — Show all commands
+/list                  — List online players
+/say Welcome to the server!  — Broadcast a message
+/gamemode creative @a  — Set all players to creative
+/kick badplayer        — Kick a player
+/op player123          — Grant operator status
+/whitelist add player123  — Add to whitelist
+/save-all              — Force a world save
+/stop                  — Gracefully shut down the server
+```
+
+> Commands are sent instantly. Enable **Auto-scroll** to follow new output.
+
+#### Stop & Restart
+- **Stop** — sends the `/stop` command to the server (graceful shutdown with 30-second timeout)
+- **Restart** — stops then starts the server with a 3-second delay
+
+---
+
+### Step 9: Running Multiple Servers
+
+You can run multiple Minecraft servers on different ports:
+
+1. Click **+ New Server**
+2. Give it a different name (e.g., "Creative Build")
+3. Use a different port (e.g., `25566`)
+4. Install and start independently
+
+Each server has its own:
+- Install directory with its own `server.jar`
+- `server.properties` configuration
+- World data
+- Console stream
+- Start/stop lifecycle
+
+---
+
+### Step 10: Updating Minecraft
+
+When a new Minecraft version releases:
+
+1. Select your server
+2. Go to **Install & Updates**
+3. Click **Install / Update Minecraft Server**
+
+The installer downloads the latest server JAR and replaces the old one. Your world data and settings are preserved.
+
+> **Warning**: Back up your world before updating. Some updates may modify world format.
+
+---
+
+### Docker Deployment
+
+For production or server environments, use Docker:
+
+```bash
+docker compose up -d
+```
+
+This builds an image containing:
+- Python 3.11 + CraftForge web server
+- Java 17 JRE for running Minecraft
+
+The container exposes:
+- **Port 8080** — CraftForge web UI
+- **Port 25565** — Minecraft server (configure additional ports for multiple servers)
+
+To manage Docker servers:
+```bash
+docker compose logs -f    # Follow logs
+docker compose stop       # Stop containers
+docker compose up -d      # Start again
 ```
 
 ---
